@@ -1,12 +1,9 @@
-function App() {
-  return (
-    <div>
-      <h1>Frenzo</h1>
-      <p>Connect. Express. Have Fun. 💕</p>
+import "./App.css";
+import { useState } from "react";
+import Home from "./pages/Home";
 
-      <button>Start a Call</button>
-    </div>
-  );
+function App() {
+  return <Home />;
 }
 
 export default App;
