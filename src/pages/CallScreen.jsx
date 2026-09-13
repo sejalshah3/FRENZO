@@ -7,33 +7,57 @@ import {
   MicOff,
   PhoneOff,
 } from "lucide-react";
+
 const socket = io("http://localhost:3001");
 
-function CallScreen({ onEndCall, friendName = "Rohan Verma" }) {
-    const [roomId] = useState(
-        () => `FRENZO-${Math.floor(1000 + Math.random() * 9000)}`
-      );
-      const [showJoin, setShowJoin] = useState(false);
-const [joinRoomId, setJoinRoomId] = useState("");
+function CallScreen({
+  onEndCall,
+  friendName = "Rohan Verma",
+  isHost = true,
+}) {
+  // ================================
+  // ROOM
+  // ================================
 
-useEffect(() => {
-    socket.on("user-joined", (userId) => {
-      console.log("Friend joined:", userId);
-    });
-  
-    return () => {
-      socket.off("user-joined");
-    };
-  }, []);
+  const [roomId] = useState(
+    () => `FRENZO-${Math.floor(1000 + Math.random() * 9000)}`
+  );
+
+  const [currentRoomId, setCurrentRoomId] = useState(
+    isHost ? roomId : ""
+  );
+
+  const [isHostUser, setIsHostUser] = useState(isHost);
+
+  const [showJoin, setShowJoin] = useState(false);
+  const [joinRoomId, setJoinRoomId] = useState("");
+
+  // ================================
+  // CALL STATE
+  // ================================
 
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
   const [isFriendBig, setIsFriendBig] = useState(false);
+  const [friendConnected, setFriendConnected] = useState(false);
+  const [remoteStream, setRemoteStream] = useState(null);
+
+  // ================================
+  // VIDEO / WEBRTC REFS
+  // ================================
 
   const videoRef = useRef(null);
-  const streamRef = useRef(null);
+  const friendVideoRef = useRef(null);
 
-  // Start camera
+  const streamRef = useRef(null);
+  const peerRef = useRef(null);
+
+  const pendingCandidatesRef = useRef([]);
+
+  // ================================
+  // START CAMERA
+  // ================================
+
   useEffect(() => {
     const startMedia = async () => {
       try {
@@ -48,8 +72,13 @@ useEffect(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
+
+        console.log("Camera and microphone ready");
       } catch (error) {
-        console.error("Camera/Microphone error:", error);
+        console.error(
+          "Camera/Microphone error:",
+          error
+        );
       }
     };
 
@@ -57,107 +86,545 @@ useEffect(() => {
 
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => {
-          track.stop();
-        });
+        streamRef.current
+          .getTracks()
+          .forEach((track) => track.stop());
+      }
+
+      if (peerRef.current) {
+        peerRef.current.close();
+        peerRef.current = null;
       }
     };
   }, []);
 
-  // Microphone
+  // ================================
+  // CREATE PEER CONNECTION
+  // ================================
+
+  const createPeer = (otherUserId) => {
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: "stun:stun.l.google.com:19302",
+        },
+      ],
+    });
+
+    
+
+    peerRef.current = peer;
+
+    // Add our camera + microphone
+    if (streamRef.current) {
+      streamRef.current
+        .getTracks()
+        .forEach((track) => {
+          peer.addTrack(
+            track,
+            streamRef.current
+          );
+        });
+    }
+
+    // Receive friend's camera + microphone
+    peer.ontrack = (event) => {
+      console.log("Friend media received");
+    
+      const stream = event.streams[0];
+    
+      setRemoteStream(stream);
+      setFriendConnected(true);
+    };
+
+    // Send ICE candidates
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", {
+          candidate: event.candidate,
+          to: otherUserId,
+        });
+      }
+    };
+
+    // Connection status
+    peer.onconnectionstatechange = () => {
+      console.log(
+        "WebRTC connection:",
+        peer.connectionState
+      );
+
+      if (peer.connectionState === "connected") {
+        setFriendConnected(true);
+      }
+
+      if (
+        peer.connectionState === "disconnected" ||
+        peer.connectionState === "failed" ||
+        peer.connectionState === "closed"
+      ) {
+        setFriendConnected(false);
+      }
+    };
+
+    return peer;
+  };
+
+  useEffect(() => {
+    if (
+      friendVideoRef.current &&
+      remoteStream
+    ) {
+      friendVideoRef.current.srcObject =
+        remoteStream;
+  
+      console.log("Remote video attached");
+    }
+  }, [remoteStream]);
+
+  // ================================
+  // HOST CREATES / JOINS ROOM
+  // ================================
+
+  useEffect(() => {
+    if (!isHostUser) return;
+
+    socket.emit("join-room", roomId);
+
+    setCurrentRoomId(roomId);
+
+    console.log(
+      "Host created room:",
+      roomId
+    );
+  }, [isHostUser, roomId]);
+
+  // ================================
+  // WEBRTC SIGNALING
+  // ================================
+
+  useEffect(() => {
+    // --------------------------------
+    // HOST:
+    // FRIEND JOINED
+    // --------------------------------
+
+    const handleUserJoined = async (userId) => {
+      console.log(
+        "Friend joined:",
+        userId
+      );
+
+      if (!isHostUser) return;
+
+      if (!streamRef.current) {
+        console.log(
+          "Camera is not ready yet"
+        );
+        return;
+      }
+
+      const peer = createPeer(userId);
+
+      try {
+        const offer =
+          await peer.createOffer();
+
+        await peer.setLocalDescription(
+          offer
+        );
+
+        socket.emit("offer", {
+          offer,
+          to: userId,
+        });
+
+        console.log("Offer sent");
+      } catch (error) {
+        console.error(
+          "Offer error:",
+          error
+        );
+      }
+    };
+
+    // --------------------------------
+    // GUEST:
+    // RECEIVE OFFER
+    // --------------------------------
+
+    const handleOffer = async ({
+      offer,
+      from,
+    }) => {
+      console.log(
+        "Offer received from:",
+        from
+      );
+
+      if (!streamRef.current) {
+        console.log(
+          "Camera is not ready yet"
+        );
+        return;
+      }
+
+      const peer = createPeer(from);
+
+      try {
+        await peer.setRemoteDescription(
+          new RTCSessionDescription(
+            offer
+          )
+        );
+
+        // Add waiting ICE candidates
+        for (const candidate of
+          pendingCandidatesRef.current) {
+          await peer.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+        }
+
+        pendingCandidatesRef.current = [];
+
+        const answer =
+          await peer.createAnswer();
+
+        await peer.setLocalDescription(
+          answer
+        );
+
+        socket.emit("answer", {
+          answer,
+          to: from,
+        });
+
+        console.log("Answer sent");
+      } catch (error) {
+        console.error(
+          "Offer handling error:",
+          error
+        );
+      }
+    };
+
+    // --------------------------------
+    // HOST:
+    // RECEIVE ANSWER
+    // --------------------------------
+
+    const handleAnswer = async ({
+      answer,
+    }) => {
+      console.log("Answer received");
+
+      if (!peerRef.current) return;
+
+      try {
+        await peerRef.current.setRemoteDescription(
+          new RTCSessionDescription(
+            answer
+          )
+        );
+
+        // Add waiting ICE candidates
+        for (const candidate of
+          pendingCandidatesRef.current) {
+          await peerRef.current.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+        }
+
+        pendingCandidatesRef.current = [];
+
+        console.log(
+          "Remote description added"
+        );
+      } catch (error) {
+        console.error(
+          "Answer error:",
+          error
+        );
+      }
+    };
+
+    // --------------------------------
+    // ICE CANDIDATES
+    // --------------------------------
+
+    const handleIceCandidate = async ({
+      candidate,
+    }) => {
+      if (!candidate) return;
+
+      if (
+        peerRef.current &&
+        peerRef.current.remoteDescription
+      ) {
+        try {
+          await peerRef.current.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+
+          console.log(
+            "ICE candidate added"
+          );
+        } catch (error) {
+          console.error(
+            "ICE candidate error:",
+            error
+          );
+        }
+      } else {
+        pendingCandidatesRef.current.push(
+          candidate
+        );
+      }
+    };
+
+    socket.on(
+      "user-joined",
+      handleUserJoined
+    );
+
+    socket.on(
+      "offer",
+      handleOffer
+    );
+
+    socket.on(
+      "answer",
+      handleAnswer
+    );
+
+    socket.on(
+      "ice-candidate",
+      handleIceCandidate
+    );
+
+    return () => {
+      socket.off(
+        "user-joined",
+        handleUserJoined
+      );
+
+      socket.off(
+        "offer",
+        handleOffer
+      );
+
+      socket.off(
+        "answer",
+        handleAnswer
+      );
+
+      socket.off(
+        "ice-candidate",
+        handleIceCandidate
+      );
+    };
+  }, [isHostUser]);
+
+  // ================================
+  // JOIN ROOM
+  // ================================
+
+  const joinRoom = () => {
+    const room =
+      joinRoomId.trim().toUpperCase();
+
+    if (!room) {
+      alert("Please enter a room code");
+      return;
+    }
+
+    // This window becomes the guest
+    setIsHostUser(false);
+
+    socket.emit(
+      "join-room",
+      room
+    );
+
+    setCurrentRoomId(room);
+
+    setShowJoin(false);
+
+    setJoinRoomId("");
+
+    console.log(
+      "Joined room:",
+      room
+    );
+  };
+
+  // ================================
+  // MICROPHONE
+  // ================================
+
   const toggleMic = () => {
     const newState = !micOn;
+
     setMicOn(newState);
 
     if (streamRef.current) {
-      streamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = newState;
-      });
+      streamRef.current
+        .getAudioTracks()
+        .forEach((track) => {
+          track.enabled = newState;
+        });
     }
   };
 
-  // Camera
+  // ================================
+  // CAMERA
+  // ================================
+
   const toggleCamera = () => {
     const newState = !cameraOn;
+
     setCameraOn(newState);
 
     if (streamRef.current) {
-      streamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = newState;
-      });
+      streamRef.current
+        .getVideoTracks()
+        .forEach((track) => {
+          track.enabled = newState;
+        });
     }
   };
 
-  // End call
+  // ================================
+  // END CALL
+  // ================================
+
   const endCall = () => {
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
+      streamRef.current
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        );
 
       streamRef.current = null;
     }
+
+    setFriendConnected(false);
 
     if (onEndCall) {
       onEndCall();
     }
   };
 
-  // Swap screens
+  // ================================
+  // SWAP VIDEOS
+  // ================================
+
   const swapScreens = () => {
-    setIsFriendBig((prev) => !prev);
+    setIsFriendBig(
+      (prev) => !prev
+    );
   };
+
+  // ================================
+  // UI
+  // ================================
 
   return (
     <div className="call-screen">
 
-      {/* Header */}
+      {/* HEADER */}
+
       <div className="call-header">
-  <div>
-    <h1>Frenzo</h1>
-    <span>Private call ♡</span>
-  </div>
 
-  <div className="room-actions">
-  <div className="room-id">
-    Room: <strong>{roomId}</strong>
-  </div>
+        <div>
+          <h1>Frenzo</h1>
 
-  <button
-  className="join-btn"
-  onClick={() => setShowJoin(true)}
->
-  Join Call
-</button>
-</div>
-</div>
+          <span>
+            Private call ♡
+          </span>
+        </div>
+
+        <div className="room-actions">
+
+          <div className="room-id">
+            Room:{" "}
+            <strong>
+              {currentRoomId ||
+                "Not joined"}
+            </strong>
+          </div>
+
+          <button
+            className="join-btn"
+            onClick={() =>
+              setShowJoin(true)
+            }
+          >
+            Join Call
+          </button>
+
+        </div>
+
+      </div>
 
       {/* VIDEO AREA */}
+
       <div className="call-video-area">
 
         {/* FRIEND VIDEO */}
+
         <div
           className={`friend-video ${
-            isFriendBig ? "friend-big" : "friend-small"
+            isFriendBig
+              ? "friend-big"
+              : "friend-small"
           }`}
           onClick={swapScreens}
         >
-          <div className="friend-avatar">
-            👨🏻
-          </div>
+
+          {friendConnected ? (
+            <video
+              ref={friendVideoRef}
+              autoPlay
+              playsInline
+              className="friend-camera-video"
+            />
+          ) : (
+            <div className="friend-avatar">
+              👨🏻
+            </div>
+          )}
 
           <div className="friend-name">
             {friendName}
           </div>
+
         </div>
 
         {/* MY VIDEO */}
+
         <div
           className={`my-video ${
-            isFriendBig ? "my-small" : "my-big"
+            isFriendBig
+              ? "my-small"
+              : "my-big"
           }`}
           onClick={swapScreens}
         >
+
           {cameraOn ? (
             <video
               ref={videoRef}
@@ -168,25 +635,35 @@ useEffect(() => {
             />
           ) : (
             <div className="camera-off">
+
               <VideoOff size={35} />
-              <p>Camera off</p>
+
+              <p>
+                Camera off
+              </p>
+
             </div>
           )}
 
           <div className="my-name">
             You
           </div>
+
         </div>
 
       </div>
 
       {/* CONTROLS */}
+
       <div className="call-controls">
 
-        {/* Microphone */}
+        {/* MICROPHONE */}
+
         <button
           className={`control-btn ${
-            !micOn ? "control-off" : ""
+            !micOn
+              ? "control-off"
+              : ""
           }`}
           onClick={toggleMic}
         >
@@ -197,10 +674,13 @@ useEffect(() => {
           )}
         </button>
 
-        {/* Camera */}
+        {/* CAMERA */}
+
         <button
           className={`control-btn ${
-            !cameraOn ? "control-off" : ""
+            !cameraOn
+              ? "control-off"
+              : ""
           }`}
           onClick={toggleCamera}
         >
@@ -211,7 +691,8 @@ useEffect(() => {
           )}
         </button>
 
-        {/* End call */}
+        {/* END CALL */}
+
         <button
           className="end-call-btn"
           onClick={endCall}
@@ -222,58 +703,70 @@ useEffect(() => {
       </div>
 
       {/* STATUS */}
+
       <p className="call-hint">
-        {micOn && cameraOn
+
+        {friendConnected
+          ? "Connected to your friend ♡"
+          : micOn && cameraOn
           ? "Your camera and microphone are ready ♡"
           : !micOn && !cameraOn
           ? "Camera and microphone are off"
           : !micOn
           ? "Microphone is off"
           : "Camera is off"}
+
       </p>
 
+      {/* JOIN POPUP */}
+
       {showJoin && (
-  <div className="join-overlay">
-    <div className="join-box">
+        <div className="join-overlay">
 
-      <h2>Join a Frenzo Call ♡</h2>
+          <div className="join-box">
 
-      <p>Enter your friend's room code</p>
+            <h2>
+              Join a Frenzo Call ♡
+            </h2>
 
-      <input
-        value={joinRoomId}
-        onChange={(e) => setJoinRoomId(e.target.value)}
-        placeholder="FRENZO-1234"
-      />
+            <p>
+              Enter your friend's room
+              code
+            </p>
 
-      <div className="join-actions">
-        <button
-          onClick={() => setShowJoin(false)}
-        >
-          Cancel
-        </button>
+            <input
+              value={joinRoomId}
+              onChange={(e) =>
+                setJoinRoomId(
+                  e.target.value
+                )
+              }
+              placeholder="FRENZO-1234"
+            />
 
-        <button
-  onClick={() => {
-    if (!joinRoomId.trim()) {
-      alert("Please enter a room code");
-      return;
-    }
+            <div className="join-actions">
 
-    socket.emit("join-room", joinRoomId.trim().toUpperCase());
+              <button
+                onClick={() => {
+                  setShowJoin(false);
+                  setJoinRoomId("");
+                }}
+              >
+                Cancel
+              </button>
 
-    console.log("Joined room:", joinRoomId);
+              <button
+                onClick={joinRoom}
+              >
+                Join
+              </button>
 
-    setShowJoin(false);
-  }}
->
-  Join
-</button>
-      </div>
+            </div>
 
-    </div>
-  </div>
-)}
+          </div>
+
+        </div>
+      )}
 
     </div>
   );

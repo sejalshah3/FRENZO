@@ -27,16 +27,28 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("user-joined", socket.id);
   });
 
-  socket.on("offer", ({ roomId, offer }) => {
-    socket.to(roomId).emit("offer", offer);
+  // Send offer to a specific user
+  socket.on("offer", ({ offer, to }) => {
+    io.to(to).emit("offer", {
+      offer,
+      from: socket.id,
+    });
   });
 
-  socket.on("answer", ({ roomId, answer }) => {
-    socket.to(roomId).emit("answer", answer);
+  // Send answer to a specific user
+  socket.on("answer", ({ answer, to }) => {
+    io.to(to).emit("answer", {
+      answer,
+      from: socket.id,
+    });
   });
 
-  socket.on("ice-candidate", ({ roomId, candidate }) => {
-    socket.to(roomId).emit("ice-candidate", candidate);
+  // Send ICE candidate to a specific user
+  socket.on("ice-candidate", ({ candidate, to }) => {
+    io.to(to).emit("ice-candidate", {
+      candidate,
+      from: socket.id,
+    });
   });
 
   socket.on("disconnect", () => {

@@ -65,9 +65,10 @@ function Home() {
   if (showCallScreen) {
     return (
       <CallScreen
-        friendName={selectedFriend}
-        onEndCall={endCall}
-      />
+  friendName={selectedFriend}
+  onEndCall={endCall}
+  isHost={true}
+/>
     );
   }
 
