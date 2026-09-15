@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from "react";
+
 import { io } from "socket.io-client";
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import {
   Video,
   VideoOff,
   Mic,
   MicOff,
   PhoneOff,
+  Sparkles,
 } from "lucide-react";
 
 const socket = io("http://localhost:3001");
@@ -38,6 +41,10 @@ function CallScreen({
 
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
+  const [filter, setFilter] = useState("none");
+const [showFilters, setShowFilters] = useState(false);
+const [handDetected, setHandDetected] = useState(false);
+const [gesture, setGesture] = useState("");
   const [isFriendBig, setIsFriendBig] = useState(false);
   const [friendConnected, setFriendConnected] = useState(false);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -51,6 +58,144 @@ function CallScreen({
 
   const streamRef = useRef(null);
   const peerRef = useRef(null);
+  const friendSocketIdRef = useRef(null);
+  const handLandmarkerRef = useRef(null);
+  const canvasRef = useRef(null);
+const drawingPointsRef = useRef([]);
+
+  const createHandLandmarker = async () => {
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+    );
+  
+    handLandmarkerRef.current = await HandLandmarker.createFromOptions(
+      vision,
+      {
+        baseOptions: {
+          modelAssetPath: "/models/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      }
+    );
+  
+    console.log("Hand detector ready");
+  };
+
+  useEffect(() => {
+    createHandLandmarker();
+  }, []);
+
+  useEffect(() => {
+    let animationFrameId;
+  
+    const detectHands = () => {
+      const video = videoRef.current;
+      const handLandmarker = handLandmarkerRef.current;
+  
+      if (
+        video &&
+        handLandmarker &&
+        video.readyState >= 2
+      ) {
+        const results = handLandmarker.detectForVideo(
+          video,
+          performance.now()
+        );
+        const hasHand =
+        results.landmarks && results.landmarks.length > 0;
+      
+      setHandDetected(hasHand);
+      
+      if (hasHand) {
+        const detectedGesture = detectGesture(results.landmarks);
+        setGesture(detectedGesture);
+      
+        drawFinger(results.landmarks);
+      }
+      
+      else {
+        setGesture("");
+      }
+        
+      }
+  
+      animationFrameId = requestAnimationFrame(detectHands);
+    };
+  
+    detectHands();
+  
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
+
+  const detectGesture = (landmarks) => {
+    if (!landmarks || landmarks.length === 0) {
+      return "";
+    }
+  
+    const hand = landmarks[0];
+  
+    const thumbUp =
+      hand[4].y < hand[3].y &&
+      hand[3].y < hand[2].y &&
+      hand[2].y < hand[1].y;
+  
+    const fingersClosed =
+      hand[8].y > hand[6].y &&
+      hand[12].y > hand[10].y &&
+      hand[16].y > hand[14].y &&
+      hand[20].y > hand[18].y;
+  
+      if (thumbUp && fingersClosed) {
+        return "👍";
+      }
+      
+      const peaceSign =
+        hand[8].y < hand[6].y &&
+        hand[12].y < hand[10].y &&
+        hand[16].y > hand[14].y &&
+        hand[20].y > hand[18].y;
+      
+      if (peaceSign) {
+        return "✌️";
+      }
+      
+      return "";
+  };
+
+  const drawFinger = (landmarks) => {
+    if (!canvasRef.current || !landmarks || landmarks.length === 0) {
+      return;
+    }
+  
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+  
+    const finger = landmarks[0][8];
+  
+    const x = finger.x * canvas.width;
+    const y = finger.y * canvas.height;
+  
+    drawingPointsRef.current.push({ x, y });
+  
+    if (drawingPointsRef.current.length > 1) {
+      const previous =
+        drawingPointsRef.current[
+          drawingPointsRef.current.length - 2
+        ];
+  
+      ctx.beginPath();
+      ctx.moveTo(previous.x, previous.y);
+      ctx.lineTo(x, y);
+      ctx.strokeStyle = "#ff4f9a";
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+  };
 
   const pendingCandidatesRef = useRef([]);
 
@@ -91,10 +236,12 @@ function CallScreen({
           .forEach((track) => track.stop());
       }
 
-      if (peerRef.current) {
-        peerRef.current.close();
-        peerRef.current = null;
-      }
+      const friendSocketId = peerRef.current?.remoteSocketId;
+
+if (peerRef.current) {
+  peerRef.current.close();
+  peerRef.current = null;
+}
     };
   }, []);
 
@@ -210,6 +357,9 @@ function CallScreen({
     // --------------------------------
 
     const handleUserJoined = async (userId) => {
+
+      friendSocketIdRef.current = userId;
+
       console.log(
         "Friend joined:",
         userId
@@ -409,6 +559,22 @@ function CallScreen({
       handleIceCandidate
     );
 
+    socket.on("call-ended", () => {
+      if (peerRef.current) {
+        peerRef.current.close();
+        peerRef.current = null;
+      }
+    
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
+        streamRef.current = null;
+      }
+    
+      onEndCall();
+    });
+
     return () => {
       socket.off(
         "user-joined",
@@ -429,6 +595,7 @@ function CallScreen({
         "ice-candidate",
         handleIceCandidate
       );
+      socket.off("call-ended");
     };
   }, [isHostUser]);
 
@@ -510,22 +677,21 @@ function CallScreen({
       peerRef.current.close();
       peerRef.current = null;
     }
-
+  
     if (streamRef.current) {
-      streamRef.current
-        .getTracks()
-        .forEach((track) =>
-          track.stop()
-        );
-
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
       streamRef.current = null;
     }
-
-    setFriendConnected(false);
-
-    if (onEndCall) {
-      onEndCall();
+  
+    if (friendSocketIdRef.current) {
+      socket.emit("end-call", {
+        to: friendSocketIdRef.current,
+      });
     }
+  
+    onEndCall();
   };
 
   // ================================
@@ -544,6 +710,12 @@ function CallScreen({
 
   return (
     <div className="call-screen">
+
+{handDetected && (
+  <div className="hand-detected">
+    {gesture || "✋ Hand detected!"}
+  </div>
+)}
 
       {/* HEADER */}
 
@@ -602,6 +774,8 @@ function CallScreen({
               playsInline
               className="friend-camera-video"
             />
+
+            
           ) : (
             <div className="friend-avatar">
               👨🏻
@@ -625,15 +799,22 @@ function CallScreen({
           onClick={swapScreens}
         >
 
-          {cameraOn ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="camera-video"
-            />
-          ) : (
+{cameraOn ? (
+  <>
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      style={{ filter: filter }}
+    />
+
+    <canvas
+      ref={canvasRef}
+      className="drawing-canvas"
+    />
+  </>
+) : (
             <div className="camera-off">
 
               <VideoOff size={35} />
@@ -690,6 +871,44 @@ function CallScreen({
             <VideoOff size={22} />
           )}
         </button>
+
+        <button
+
+  className="control-btn"
+
+  onClick={() => setShowFilters(!showFilters)}
+
+  title="Filters"
+
+>
+
+  <Sparkles size={22} />
+
+</button>
+
+{showFilters && (
+  <div className="filter-menu">
+    <button onClick={() => setFilter("none")}>
+      Normal
+    </button>
+
+    <button onClick={() => setFilter("grayscale(1)")}>
+      🖤 Grayscale
+    </button>
+
+    <button onClick={() => setFilter("sepia(1)")}>
+      🟤 Sepia
+    </button>
+
+    <button onClick={() => setFilter("brightness(1.3)")}>
+      ☀️ Bright
+    </button>
+
+    <button onClick={() => setFilter("blur(3px)")}>
+      🌫️ Blur
+    </button>
+  </div>
+)}
 
         {/* END CALL */}
 

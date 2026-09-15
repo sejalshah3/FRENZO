@@ -1029,3 +1029,25 @@ button {
   display: block;
   border-radius: inherit;
 }
+
+.hand-detected {
+  position: absolute;
+  top: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px 20px;
+  border-radius: 25px;
+  font-size: 16px;
+  font-weight: 600;
+  z-index: 20;
+}
+
+.drawing-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}

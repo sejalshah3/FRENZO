@@ -51,6 +51,11 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("end-call", ({ to }) => {
+    io.to(to).emit("call-ended");
+    console.log(`${socket.id} ended the call`);
+  });
+  
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
