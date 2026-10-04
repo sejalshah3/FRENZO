@@ -166,37 +166,56 @@ const drawingPointsRef = useRef([]);
       return "";
   };
 
-  const drawFinger = (landmarks) => {
-    if (!canvasRef.current || !landmarks || landmarks.length === 0) {
-      return;
-    }
-  
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-  
-    const finger = landmarks[0][8];
-  
-    const x = finger.x * canvas.width;
-    const y = finger.y * canvas.height;
-  
-    drawingPointsRef.current.push({ x, y });
-  
-    if (drawingPointsRef.current.length > 1) {
-      const previous =
-        drawingPointsRef.current[
-          drawingPointsRef.current.length - 2
-        ];
-  
-      ctx.beginPath();
-      ctx.moveTo(previous.x, previous.y);
-      ctx.lineTo(x, y);
-      ctx.strokeStyle = "#ff4f9a";
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.stroke();
-    }
-  };
+  const flowerImageRef = useRef(null);
 
+useEffect(() => {
+  const flower = new Image();
+  flower.src = "/effects/flower.png";
+
+  flower.onload = () => {
+    flowerImageRef.current = flower;
+  };
+}, []);
+
+const drawFinger = (landmarks) => {
+  if (
+    !canvasRef.current ||
+    !landmarks ||
+    landmarks.length === 0 ||
+    !flowerImageRef.current
+  ) {
+    return;
+  }
+
+  const canvas = canvasRef.current;
+  const ctx = canvas.getContext("2d");
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const hand = landmarks[0];
+
+const fingers = [
+  hand[4],  // thumb
+  hand[8],  // index
+  hand[12], // middle
+];
+
+const size = 25;
+
+fingers.forEach((finger) => {
+  const x = finger.x * canvas.width;
+  const y = finger.y * canvas.height;
+
+  ctx.drawImage(
+    flowerImageRef.current,
+    x - size / 2,
+    y - size / 2,
+    size,
+    size
+  );
+});
+};
+  
   const pendingCandidatesRef = useRef([]);
 
   // ================================
