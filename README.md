@@ -35,13 +35,17 @@ This makes video communication more expressive and engaging.
 - Tracks 21 hand landmarks
 - Tracks fingertips in real time
 
-### 👍 Gesture Recognition
-Currently supports gestures such as:
+### 🤖 Gesture Recognition
 
-- 👍 Thumbs Up
-- ✌️ Peace Sign
+Frenzo recognizes hand gestures and can automatically change AR effects:
 
-More gestures can be added in the future.
+| Gesture | AR Effect |
+
+ 👍 Thumbs Up - 💕 Hearts 
+
+ ✌🏻 Peace Sign - ⭐ Stars 
+
+| ✋ Hand / No recognized gesture | 🌸 Flowers |
 
 ### 🌸 AR Hand Effects
 Frenzo uses hand landmark coordinates to create interactive AR effects.

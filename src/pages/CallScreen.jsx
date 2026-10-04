@@ -45,6 +45,7 @@ function CallScreen({
 const [showFilters, setShowFilters] = useState(false);
 const [handDetected, setHandDetected] = useState(false);
 const [gesture, setGesture] = useState("");
+const [arEffect, setArEffect] = useState("flower");
   const [isFriendBig, setIsFriendBig] = useState(false);
   const [friendConnected, setFriendConnected] = useState(false);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -112,6 +113,14 @@ const drawingPointsRef = useRef([]);
         const detectedGesture = detectGesture(results.landmarks);
         setGesture(detectedGesture);
       
+        if (detectedGesture === "👍") {
+          setArEffect("heart");
+        } else if (detectedGesture === "✌️") {
+          setArEffect("star");
+        } else if (detectedGesture === "") {
+          setArEffect("flower");
+        }
+      
         drawFinger(results.landmarks);
       }
       
@@ -129,7 +138,7 @@ const drawingPointsRef = useRef([]);
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [arEffect]);
 
   const detectGesture = (landmarks) => {
     if (!landmarks || landmarks.length === 0) {
@@ -167,22 +176,36 @@ const drawingPointsRef = useRef([]);
   };
 
   const flowerImageRef = useRef(null);
+  const starImageRef = useRef(null);
+  const heartImageRef = useRef(null);
 
-useEffect(() => {
-  const flower = new Image();
-  flower.src = "/effects/flower.png";
-
-  flower.onload = () => {
-    flowerImageRef.current = flower;
-  };
-}, []);
+  useEffect(() => {
+    const flower = new Image();
+    flower.src = "/effects/flower.png";
+  
+    flower.onload = () => {
+      flowerImageRef.current = flower;
+    };
+  
+    const star = new Image();
+    star.src = "/effects/star.png";
+  
+    star.onload = () => {
+      starImageRef.current = star;
+    };
+    const heart = new Image();
+    heart.src = "/effects/heart.png";
+  
+    heart.onload = () => {
+      heartImageRef.current = heart;
+    };
+  }, []);
 
 const drawFinger = (landmarks) => {
   if (
     !canvasRef.current ||
     !landmarks ||
-    landmarks.length === 0 ||
-    !flowerImageRef.current
+    landmarks.length === 0
   ) {
     return;
   }
@@ -200,14 +223,25 @@ const fingers = [
   hand[12], // middle
 ];
 
-const size = 25;
+const size = 15 + Math.sin(Date.now() / 150) * 5;
 
 fingers.forEach((finger) => {
   const x = finger.x * canvas.width;
   const y = finger.y * canvas.height;
 
+  const image =
+  arEffect === "star"
+    ? starImageRef.current
+    : arEffect === "heart"
+    ? heartImageRef.current
+    : flowerImageRef.current;
+
+      console.log("AR Effect:", arEffect);
+
+  if (!image) return;
+
   ctx.drawImage(
-    flowerImageRef.current,
+    image,
     x - size / 2,
     y - size / 2,
     size,
@@ -926,6 +960,19 @@ if (peerRef.current) {
     <button onClick={() => setFilter("blur(3px)")}>
       🌫️ Blur
     </button>
+
+    <button
+  onClick={() => {
+    setArEffect("star");
+    console.log("STAR BUTTON CLICKED");
+  }}
+>
+  ⭐ Stars
+</button>
+
+<button onClick={() => setArEffect("heart")}>
+  💕 Hearts
+</button>
   </div>
 )}
 
