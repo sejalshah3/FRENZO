@@ -1,16 +1,47 @@
-# React + Vite
+# Frenzo
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### Real-Time Video Calling with Interactive AR Effects
 
-Currently, two official plugins are available:
+Frenzo is a real-time video calling web application designed to make online conversations more **interactive, expressive, and fun**.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Unlike a basic video-calling application, Frenzo combines **WebRTC video communication with real-time hand tracking, gesture detection, camera filters, and interactive AR effects**.
 
-## React Compiler
+The project focuses on exploring how computer vision can be integrated into a real-time communication platform.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## Expanding the ESLint configuration
+For example:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- Show your hand → the system detects it.
+- Show 👍 → Frenzo recognizes the gesture.
+- Move your finger → an AR flower follows your fingertip.
+- Apply filters → change the appearance of your camera feed.
+
+This makes video communication more expressive and engaging.
+
+## ✨ Key Features
+
+### 📹 Real-Time Video Calling
+- Peer-to-peer video communication using WebRTC
+- Camera and microphone support
+- Real-time connection between users
+
+### 🔗 Room-Based Calling
+- Automatically generated room codes
+- Users can join calls using a room code
+- Socket.IO handles real-time signaling
+
+### ✋ Hand Tracking
+- Detects hands using MediaPipe
+- Tracks 21 hand landmarks
+- Tracks fingertips in real time
+
+### 👍 Gesture Recognition
+Currently supports gestures such as:
+
+- 👍 Thumbs Up
+- ✌️ Peace Sign
+
+More gestures can be added in the future.
+
+### 🌸 AR Hand Effects
+Frenzo uses hand landmark coordinates to create interactive AR effects.
