@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 
 import { io } from "socket.io-client";
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import {
+  FilesetResolver,
+  HandLandmarker,
+  FaceLandmarker,
+} from "@mediapipe/tasks-vision";
 import {
   Video,
   VideoOff,
@@ -46,6 +50,8 @@ const [showFilters, setShowFilters] = useState(false);
 const [handDetected, setHandDetected] = useState(false);
 const [gesture, setGesture] = useState("");
 const [arEffect, setArEffect] = useState("flower");
+const [drawingOn, setDrawingOn] = useState(true);
+const [faceFilter, setFaceFilter] = useState("none");
   const [isFriendBig, setIsFriendBig] = useState(false);
   const [friendConnected, setFriendConnected] = useState(false);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -61,8 +67,13 @@ const [arEffect, setArEffect] = useState("flower");
   const peerRef = useRef(null);
   const friendSocketIdRef = useRef(null);
   const handLandmarkerRef = useRef(null);
+  const faceLandmarkerRef = useRef(null);
   const canvasRef = useRef(null);
-const drawingPointsRef = useRef([]);
+  const faceFilterCanvasRef = useRef(null);
+  const drawingPointsRef = useRef([]);
+  const previousGestureRef = useRef("");
+  const boomParticlesRef = useRef([]);
+  const isBoomingRef = useRef(false);
 
   const createHandLandmarker = async () => {
     const vision = await FilesetResolver.forVisionTasks(
@@ -84,16 +95,110 @@ const drawingPointsRef = useRef([]);
     console.log("Hand detector ready");
   };
 
+  const createFaceLandmarker = async () => {
+
+    const vision = await FilesetResolver.forVisionTasks(
+  
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+  
+    );
+  
+    faceLandmarkerRef.current =
+  
+      await FaceLandmarker.createFromOptions(
+  
+        vision,
+  
+        {
+  
+          baseOptions: {
+  
+            modelAssetPath:
+  
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+  
+            delegate: "GPU",
+  
+          },
+  
+          runningMode: "VIDEO",
+  
+          numFaces: 1,
+  
+        }
+  
+      );
+  
+    console.log("Face detector ready");
+  
+  };
+
   useEffect(() => {
     createHandLandmarker();
+    createFaceLandmarker();
   }, []);
 
   useEffect(() => {
     let animationFrameId;
+
+    const drawFaceFilter = (faceLandmarks) => {
+      if (!canvasRef.current || !faceLandmarks || faceLandmarks.length === 0) {
+        return;
+      }
+    
+      if (faceFilter !== "glasses") {
+        return;
+      }
+    
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+    
+      const face = faceLandmarks[0];
+    
+      // Left and right eye area
+      const leftEye = face[33];
+      const rightEye = face[263];
+    
+      const x1 = leftEye.x * canvas.width;
+      const y1 = leftEye.y * canvas.height;
+    
+      const x2 = rightEye.x * canvas.width;
+      const y2 = rightEye.y * canvas.height;
+    
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+    
+      const width = Math.abs(x2 - x1) * 2.2;
+      const height = width * 0.45;
+    
+      const image = glassesImageRef.current;
+    
+      if (!image) return;
+    
+      ctx.drawImage(
+        image,
+        centerX - width / 2,
+        centerY - height / 2,
+        width,
+        height
+      );
+    };
   
     const detectHands = () => {
       const video = videoRef.current;
       const handLandmarker = handLandmarkerRef.current;
+      const faceLandmarker = faceLandmarkerRef.current;
+
+      if (video && faceLandmarker && video.readyState >= 2) {
+        const faceResults = faceLandmarker.detectForVideo(
+          video,
+          performance.now()
+        );
+      
+        if (faceResults.faceLandmarks.length > 0) {
+          drawFaceFilter(faceResults.faceLandmarks);
+        }
+      }
   
       if (
         video &&
@@ -111,17 +216,22 @@ const drawingPointsRef = useRef([]);
       
       if (hasHand) {
         const detectedGesture = detectGesture(results.landmarks);
+        console.log("Detected gesture:", detectedGesture);
         setGesture(detectedGesture);
       
-        if (detectedGesture === "👍") {
-          setArEffect("heart");
-        } else if (detectedGesture === "✌️") {
-          setArEffect("star");
-        } else if (detectedGesture === "") {
-          setArEffect("flower");
+        if (detectedGesture === "✋") {
+          console.log("💥 BOOM! Open hand detected!");
+        
+          if (previousGestureRef.current !== "✋") {
+            triggerBoom();
+          }
         }
+
+        previousGestureRef.current = detectedGesture;
       
-        drawFinger(results.landmarks);
+        if (drawingOn) {
+          drawFinger(results.landmarks);
+        }
       }
       
       else {
@@ -138,7 +248,7 @@ const drawingPointsRef = useRef([]);
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [arEffect]);
+  }, [arEffect, drawingOn, faceFilter]);
 
   const detectGesture = (landmarks) => {
     if (!landmarks || landmarks.length === 0) {
@@ -147,6 +257,7 @@ const drawingPointsRef = useRef([]);
   
     const hand = landmarks[0];
   
+    // 👍 Thumbs up
     const thumbUp =
       hand[4].y < hand[3].y &&
       hand[3].y < hand[2].y &&
@@ -158,26 +269,39 @@ const drawingPointsRef = useRef([]);
       hand[16].y > hand[14].y &&
       hand[20].y > hand[18].y;
   
-      if (thumbUp && fingersClosed) {
-        return "👍";
-      }
-      
-      const peaceSign =
-        hand[8].y < hand[6].y &&
-        hand[12].y < hand[10].y &&
-        hand[16].y > hand[14].y &&
-        hand[20].y > hand[18].y;
-      
-      if (peaceSign) {
-        return "✌️";
-      }
-      
-      return "";
+    if (thumbUp && fingersClosed) {
+      return "👍";
+    }
+  
+    // ✌️ Peace sign
+    const peaceSign =
+      hand[8].y < hand[6].y &&
+      hand[12].y < hand[10].y &&
+      hand[16].y > hand[14].y &&
+      hand[20].y > hand[18].y;
+  
+    if (peaceSign) {
+      return "✌️";
+    }
+  
+    // ✋ Open hand
+    const openHand =
+      hand[8].y < hand[6].y &&
+      hand[12].y < hand[10].y &&
+      hand[16].y < hand[14].y &&
+      hand[20].y < hand[18].y;
+  
+    if (openHand) {
+      return "✋";
+    }
+  
+    return "";
   };
 
   const flowerImageRef = useRef(null);
   const starImageRef = useRef(null);
   const heartImageRef = useRef(null);
+  const glassesImageRef = useRef(null);
 
   useEffect(() => {
     const flower = new Image();
@@ -199,56 +323,189 @@ const drawingPointsRef = useRef([]);
     heart.onload = () => {
       heartImageRef.current = heart;
     };
+
+    const glasses = new Image();
+glasses.src = "/effects/glasses.png";
+
+glasses.onload = () => {
+  glassesImageRef.current = glasses;
+};
   }, []);
 
-const drawFinger = (landmarks) => {
-  if (
-    !canvasRef.current ||
-    !landmarks ||
-    landmarks.length === 0
-  ) {
-    return;
-  }
+  const triggerBoom = () => {
+    if (!canvasRef.current || isBoomingRef.current) {
+      return;
+    }
+  
+    const canvas = canvasRef.current;
+  
+    isBoomingRef.current = true;
+  
+    boomParticlesRef.current = drawingPointsRef.current.map((point) => ({
+      ...point,
+      vx: (Math.random() - 0.5) * 12,
+      vy: (Math.random() - 0.5) * 12,
+      life: 1,
+    }));
+  
+    drawingPointsRef.current = [];
+  
+    const animateBoom = () => {
+      const ctx = canvas.getContext("2d");
+  
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+      boomParticlesRef.current.forEach((particle) => {
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+  
+        particle.vx *= 0.98;
+        particle.vy *= 0.98;
+  
+        particle.life -= 0.025;
+  
+        const image =
+          particle.effect === "star"
+            ? starImageRef.current
+            : particle.effect === "heart"
+            ? heartImageRef.current
+            : flowerImageRef.current;
+  
+        if (image && particle.life > 0) {
+          const size = 25 * particle.life;
+  
+          ctx.globalAlpha = particle.life;
+  
+          ctx.drawImage(
+            image,
+            particle.x - size / 2,
+            particle.y - size / 2,
+            size,
+            size
+          );
+        }
+      });
+  
+      ctx.globalAlpha = 1;
+  
+      boomParticlesRef.current =
+        boomParticlesRef.current.filter(
+          (particle) => particle.life > 0
+        );
+  
+      if (boomParticlesRef.current.length > 0) {
+        requestAnimationFrame(animateBoom);
+      } else {
+        isBoomingRef.current = false;
+      }
+    };
+  
+    animateBoom();
+  };
 
-  const canvas = canvasRef.current;
-  const ctx = canvas.getContext("2d");
+  const drawFinger = (landmarks) => {
+    if (
+      !canvasRef.current ||
+      !landmarks ||
+      landmarks.length === 0
+    ) {
+      return;
+    }
+  
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+  
+    const size = 14;
+    const spacing = 45;
+  
+    if (!drawFinger.lastPositions) {
+      drawFinger.lastPositions = {};
+    }
+  
+    landmarks.forEach((hand, handIndex) => {
+      const finger = hand[8];
+  
+      const x = finger.x * canvas.width;
+      const y = finger.y * canvas.height;
+  
+      const image =
+        arEffect === "star"
+          ? starImageRef.current
+          : arEffect === "heart"
+          ? heartImageRef.current
+          : flowerImageRef.current;
+  
+      if (!image) return;
+  
+      const lastPoint = drawFinger.lastPositions[handIndex];
+  
+      if (!lastPoint) {
+        drawingPointsRef.current.push({
+          x,
+          y,
+          effect: arEffect,
+        });
+  
+        ctx.drawImage(
+          image,
+          x - size / 2,
+          y - size / 2,
+          size,
+          size
+        );
+  
+        drawFinger.lastPositions[handIndex] = {
+          x,
+          y,
+        };
+  
+        return;
+      }
+  
+      const distance = Math.hypot(
+        x - lastPoint.x,
+        y - lastPoint.y
+      );
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const hand = landmarks[0];
-
-const fingers = [
-  hand[4],  // thumb
-  hand[8],  // index
-  hand[12], // middle
-];
-
-const size = 15 + Math.sin(Date.now() / 150) * 5;
-
-fingers.forEach((finger) => {
-  const x = finger.x * canvas.width;
-  const y = finger.y * canvas.height;
-
-  const image =
-  arEffect === "star"
-    ? starImageRef.current
-    : arEffect === "heart"
-    ? heartImageRef.current
-    : flowerImageRef.current;
-
-      console.log("AR Effect:", arEffect);
-
-  if (!image) return;
-
-  ctx.drawImage(
-    image,
-    x - size / 2,
-    y - size / 2,
-    size,
-    size
-  );
-});
-};
+      
+  
+      const steps = Math.max(
+        1,
+        Math.ceil(distance / spacing)
+      );
+  
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+  
+        const newX =
+          lastPoint.x + (x - lastPoint.x) * t;
+  
+        const newY =
+          lastPoint.y + (y - lastPoint.y) * t;
+  
+        drawingPointsRef.current.push({
+          x: newX,
+          y: newY,
+          effect: arEffect,
+        });
+  
+        ctx.drawImage(
+          image,
+          newX - size / 2,
+          newY - size / 2,
+          size,
+          size
+        );
+      }
+  
+      drawFinger.lastPositions[handIndex] = {
+        x,
+        y,
+      };
+    });
+  };
+  
+      
   
   const pendingCandidatesRef = useRef([]);
 
@@ -866,6 +1123,11 @@ if (peerRef.current) {
       ref={canvasRef}
       className="drawing-canvas"
     />
+
+<canvas
+  ref={faceFilterCanvasRef}
+  className="face-filter-canvas"
+/>
   </>
 ) : (
             <div className="camera-off">
@@ -972,6 +1234,18 @@ if (peerRef.current) {
 
 <button onClick={() => setArEffect("heart")}>
   💕 Hearts
+</button>
+
+<button onClick={() => setFaceFilter("glasses")}>
+  🕶️ Glasses
+</button>
+
+<button onClick={() => setFaceFilter("none")}>
+  ❌ Remove Face Filter
+</button>
+
+<button onClick={() => setDrawingOn(!drawingOn)}>
+  {drawingOn ? "✏️ Drawing ON" : "🛑 Drawing OFF"}
 </button>
   </div>
 )}
