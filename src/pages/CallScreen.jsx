@@ -68,17 +68,39 @@ const [faceFilter, setFaceFilter] = useState("none");
   const friendSocketIdRef = useRef(null);
   const handLandmarkerRef = useRef(null);
   const faceLandmarkerRef = useRef(null);
+  const visionPromiseRef = useRef(null);
+  const faceLandmarkerInitializingRef = useRef(false);
+const handLandmarkerInitializingRef = useRef(false);
   const canvasRef = useRef(null);
   const faceFilterCanvasRef = useRef(null);
   const drawingPointsRef = useRef([]);
   const previousGestureRef = useRef("");
+  const gestureFramesRef = useRef(0);
   const boomParticlesRef = useRef([]);
   const isBoomingRef = useRef(false);
 
+  const getVision = async () => {
+    if (!visionPromiseRef.current) {
+      visionPromiseRef.current =
+        FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm"
+        );
+    }
+  
+    return visionPromiseRef.current;
+  };
+
   const createHandLandmarker = async () => {
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-    );
+
+    if (
+      handLandmarkerRef.current ||
+      handLandmarkerInitializingRef.current
+    ) {
+      return;
+    }
+    
+    handLandmarkerInitializingRef.current = true;
+    const vision = await getVision();
   
     handLandmarkerRef.current = await HandLandmarker.createFromOptions(
       vision,
@@ -93,15 +115,22 @@ const [faceFilter, setFaceFilter] = useState("none");
     );
   
     console.log("Hand detector ready");
+
+    handLandmarkerInitializingRef.current = false;
   };
 
   const createFaceLandmarker = async () => {
 
-    const vision = await FilesetResolver.forVisionTasks(
-  
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-  
-    );
+    if (
+      faceLandmarkerRef.current ||
+      faceLandmarkerInitializingRef.current
+    ) {
+      return;
+    }
+    
+    faceLandmarkerInitializingRef.current = true;
+
+    const vision = await getVision();
   
     faceLandmarkerRef.current =
   
@@ -130,6 +159,7 @@ const [faceFilter, setFaceFilter] = useState("none");
       );
   
     console.log("Face detector ready");
+    faceLandmarkerInitializingRef.current = false;
   
   };
 
@@ -142,22 +172,34 @@ const [faceFilter, setFaceFilter] = useState("none");
     let animationFrameId;
 
     const drawFaceFilter = (faceLandmarks) => {
-      if (!canvasRef.current || !faceLandmarks || faceLandmarks.length === 0) {
-        return;
-      }
+      const canvas = faceFilterCanvasRef.current;
     
-      if (faceFilter !== "glasses") {
-        return;
-      }
+      if (!canvas) return;
     
-      const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d");
+    
+      // Clear old glasses every frame
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+      // Don't draw anything if glasses are OFF
+      if (
+        faceFilter !== "glasses" &&
+        faceFilter !== "mustache" &&
+        faceFilter !== "cat"
+      ) {
+        return;
+      }
+    
+      // Don't draw if no face is detected
+      if (!faceLandmarks || faceLandmarks.length === 0) {
+        return;
+      }
     
       const face = faceLandmarks[0];
     
-      // Left and right eye area
       const leftEye = face[33];
       const rightEye = face[263];
+      const nose = face[1];
     
       const x1 = leftEye.x * canvas.width;
       const y1 = leftEye.y * canvas.height;
@@ -166,28 +208,78 @@ const [faceFilter, setFaceFilter] = useState("none");
       const y2 = rightEye.y * canvas.height;
     
       const centerX = (x1 + x2) / 2;
-      const centerY = (y1 + y2) / 2;
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+
+const centerY =
+  faceFilter === "cat"
+    ? nose.y * canvas.height - (canvas.height * 0.12)
+    : faceFilter === "mustache"
+    ? nose.y * canvas.height + (canvas.height * 0.04)
+    : (y1 + y2) / 2;
     
-      const width = Math.abs(x2 - x1) * 2.2;
-      const height = width * 0.45;
+    const faceWidth =
+  Math.abs(face[454].x - face[234].x) * canvas.width;
+
+const width =
+  faceFilter === "cat"
+    ? faceWidth * 1.1
+    : faceFilter === "mustache"
+    ? Math.abs(x2 - x1) * 0.8
+    : Math.abs(x2 - x1) * 1.7;
+
+const height =
+  faceFilter === "cat"
+    ? width * 1.5
+    : faceFilter === "mustache"
+    ? width * 0.65
+    : width * 0.65;
     
-      const image = glassesImageRef.current;
+    const image =
+    faceFilter === "glasses"
+      ? glassesImageRef.current
+      : faceFilter === "mustache"
+      ? mustacheImageRef.current
+      : catImageRef.current;
     
       if (!image) return;
     
-      ctx.drawImage(
-        image,
-        centerX - width / 2,
-        centerY - height / 2,
-        width,
-        height
-      );
+      ctx.save();
+
+ctx.translate(centerX, centerY);
+ctx.rotate(angle);
+
+ctx.drawImage(
+  image,
+  -width / 2,
+  -height / 2,
+  width,
+  height
+);
+
+ctx.restore();
     };
   
     const detectHands = () => {
       const video = videoRef.current;
       const handLandmarker = handLandmarkerRef.current;
       const faceLandmarker = faceLandmarkerRef.current;
+
+      const faceCanvas = faceFilterCanvasRef.current;
+
+if (
+  video &&
+  faceCanvas &&
+  video.videoWidth > 0 &&
+  video.videoHeight > 0
+) {
+  if (
+    faceCanvas.width !== video.videoWidth ||
+    faceCanvas.height !== video.videoHeight
+  ) {
+    faceCanvas.width = video.videoWidth;
+    faceCanvas.height = video.videoHeight;
+  }
+}
 
       if (video && faceLandmarker && video.readyState >= 2) {
         const faceResults = faceLandmarker.detectForVideo(
@@ -220,11 +312,15 @@ const [faceFilter, setFaceFilter] = useState("none");
         setGesture(detectedGesture);
       
         if (detectedGesture === "✋") {
-          console.log("💥 BOOM! Open hand detected!");
+          gestureFramesRef.current += 1;
         
-          if (previousGestureRef.current !== "✋") {
+          if (gestureFramesRef.current >= 12) {
+            console.log("💥 BOOM! Open hand confirmed!");
             triggerBoom();
+            gestureFramesRef.current = 0;
           }
+        } else {
+          gestureFramesRef.current = 0;
         }
 
         previousGestureRef.current = detectedGesture;
@@ -302,6 +398,8 @@ const [faceFilter, setFaceFilter] = useState("none");
   const starImageRef = useRef(null);
   const heartImageRef = useRef(null);
   const glassesImageRef = useRef(null);
+  const mustacheImageRef = useRef(null);
+  const catImageRef = useRef(null);
 
   useEffect(() => {
     const flower = new Image();
@@ -329,6 +427,20 @@ glasses.src = "/effects/glasses.png";
 
 glasses.onload = () => {
   glassesImageRef.current = glasses;
+};
+
+const mustache = new Image();
+mustache.src = "/effects/mustache.png";
+
+mustache.onload = () => {
+  mustacheImageRef.current = mustache;
+};
+
+const cat = new Image();
+cat.src = "/effects/cat.png";
+
+cat.onload = () => {
+  catImageRef.current = cat;
 };
   }, []);
 
@@ -409,6 +521,7 @@ glasses.onload = () => {
       !landmarks ||
       landmarks.length === 0
     ) {
+      drawFinger.lastPositions = {};
       return;
     }
   
@@ -426,7 +539,7 @@ glasses.onload = () => {
       const finger = hand[8];
   
       const x = finger.x * canvas.width;
-      const y = finger.y * canvas.height;
+const y = finger.y * canvas.height;
   
       const image =
         arEffect === "star"
@@ -1238,6 +1351,14 @@ if (peerRef.current) {
 
 <button onClick={() => setFaceFilter("glasses")}>
   🕶️ Glasses
+</button>
+
+<button onClick={() => setFaceFilter("mustache")}>
+  🥸 Mustache
+</button>
+
+<button onClick={() => setFaceFilter("cat")}>
+  🐱 Cat
 </button>
 
 <button onClick={() => setFaceFilter("none")}>
