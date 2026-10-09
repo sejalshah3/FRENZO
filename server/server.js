@@ -55,6 +55,22 @@ io.on("connection", (socket) => {
     io.to(to).emit("call-ended");
     console.log(`${socket.id} ended the call`);
   });
+
+  // ================= CHAT =================
+
+  socket.on("send-message", ({ roomId, message }) => {
+    socket.to(roomId).emit("receive-message", {
+      message,
+      from: socket.id,
+    });
+  });
+
+  // Typing indicator
+  socket.on("typing", ({ roomId }) => {
+    console.log("⌨️ Typing in room:", roomId);
+  
+    socket.to(roomId).emit("friend-typing");
+  });
   
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import CallScreen from "./CallScreen";
+import { io } from "socket.io-client";
 
 import {
   Home as HomeIcon,
@@ -17,10 +18,54 @@ import {
 } from "lucide-react";
 
 function Home() {
+
+  const socketRef = useRef(null);
+
+if (!socketRef.current) {
+  socketRef.current = io("http://localhost:3001");
+}
+
+const socket = socketRef.current;
+  
   const [activePage, setActivePage] = useState("Home");
   const [search, setSearch] = useState("");
   const [showCallScreen, setShowCallScreen] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState("Rohan Verma");
+  const [selectedChat, setSelectedChat] = useState("Ananya Sharma");
+  const [chatRoom, setChatRoom] = useState("FRENZO-CHAT");
+  const [messageText, setMessageText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    socket.emit("join-room", chatRoom);
+  
+    socket.on("receive-message", ({ message }) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: message,
+          sender: "friend",
+        },
+      ]);
+    });
+  
+    socket.on("friend-typing", () => {
+      console.log("⌨️ FRIEND IS TYPING");
+    
+      setIsTyping(true);
+    
+      setTimeout(() => {
+        setIsTyping(false);
+      }, 2000);
+    });
+    return () => {
+      socket.off("receive-message");
+      socket.off("friend-typing");
+    };
+  }, [chatRoom]);
+
+  
 
   const friends = [
     {
@@ -59,6 +104,28 @@ function Home() {
   // End call
   const endCall = () => {
     setShowCallScreen(false);
+  };
+
+  const sendMessage = () => {
+    if (!messageText.trim()) {
+      return;
+    }
+  
+    setMessages((prev) => [
+      ...prev,
+      {
+        text: messageText,
+        sender: "me",
+      },
+    ]);
+  
+    socket.emit("send-message", {
+      roomId: chatRoom,
+      message: messageText,
+    });
+      
+  
+    setMessageText("");
   };
 
   // Show CallScreen
@@ -358,162 +425,446 @@ function Home() {
 
             {/* START CALL */}
 
-            <section className="call-card">
+            {/* ================= QUICK ACTIONS ================= */}
 
-              <div className="call-icon">
-                <Video size={34} />
-              </div>
+<section className="quick-actions-section">
+
+<div className="section-title">
+  <h2>Quick Actions</h2>
+</div>
+
+<div className="quick-actions">
+
+  {/* VIDEO CALL */}
+  <button
+    className="quick-action video-action"
+    onClick={() => startCall("Rohan Verma")}
+  >
+    <div className="quick-icon">
+      <Video size={23} />
+    </div>
+
+    <div>
+      <strong>Video Call</strong>
+      <span>Talk face-to-face</span>
+    </div>
+
+    <ArrowRight size={18} />
+  </button>
 
 
-              <div className="call-text">
+  {/* VOICE CALL */}
+  <button
+    className="quick-action voice-action"
+    onClick={() => {
+      console.log("Voice call coming next");
+    }}
+  >
+    <div className="quick-icon">
+      <Phone size={23} />
+    </div>
 
-                <h2>
-                  Start a Call
-                </h2>
+    <div>
+      <strong>Voice Call</strong>
+      <span>Just a voice away</span>
+    </div>
 
-                <p>
-                  Hop on a video call with
-                  <br />
-                  your friends instantly!
-                </p>
-
-              </div>
+    <ArrowRight size={18} />
+  </button>
 
 
-              <button
-                className="start-button"
-                onClick={() =>
-                  startCall("Rohan Verma")
-                }
-              >
+  {/* NEW CHAT */}
+  <button
+    className="quick-action chat-action"
+    onClick={() => {
+      setActivePage("Chats");
+    }}
+  >
+    <div className="quick-icon">
+      <MessageCircle size={23} />
+    </div>
 
-                Start Now
+    <div>
+      <strong>New Chat</strong>
+      <span>Send a message</span>
+    </div>
 
-                <ArrowRight size={20} />
+    <ArrowRight size={18} />
+  </button>
 
-              </button>
 
-            </section>
+  {/* ADD FRIEND */}
+  <button
+    className="quick-action friend-action"
+    onClick={() => {
+      setActivePage("Friends");
+    }}
+  >
+    <div className="quick-icon">
+      <UserPlus size={23} />
+    </div>
+
+    <div>
+      <strong>Add Friend</strong>
+      <span>Grow your circle</span>
+    </div>
+
+    <ArrowRight size={18} />
+  </button>
+
+</div>
+
+</section>
 
 
             {/* FRIENDS */}
 
-            <section className="friends-section">
+            {/* ================= ONLINE FRIENDS ================= */}
 
-              <div className="section-title">
+<section className="online-friends-section">
 
-                <h2>
-                  Your Friends
-                </h2>
+<div className="section-title">
+  <h2>Online Friends</h2>
 
-                <button
-                  onClick={() =>
-                    setActivePage("Friends")
-                  }
-                >
-                  See all →
-                </button>
+  <button
+    onClick={() => setActivePage("Friends")}
+  >
+    See all →
+  </button>
+</div>
 
-              </div>
+<div className="online-friends-list">
 
+  {/* ADD FRIEND */}
+  <button
+    className="online-friend add-friend-circle"
+    onClick={() => setActivePage("Friends")}
+  >
+    <div className="online-avatar add-avatar">
+      +
+    </div>
 
-              <div className="friends-list">
-
-                {filteredFriends.map((friend) => (
-
-                  <div
-                    className="friend-row"
-                    key={friend.name}
-                  >
-
-                    <div className="friend-avatar">
-
-                      {friend.avatar}
-
-                      <span
-                        className={`status-dot ${friend.color}`}
-                      ></span>
-
-                    </div>
+    <strong>Add Friend</strong>
+  </button>
 
 
-                    <div className="friend-info">
+  {filteredFriends.map((friend) => (
 
-                      <h3>
-                        {friend.name}
-                      </h3>
+    <div
+      className="online-friend"
+      key={friend.name}
+    >
 
-                      <span
-                        className={`status ${friend.color}`}
-                      >
-                        {friend.status}
-                      </span>
+      <div className="online-avatar">
 
-                    </div>
+        {friend.name.charAt(0)}
+
+        <span
+          className={`online-status ${friend.color}`}
+        ></span>
+
+      </div>
+
+      <strong>
+        {friend.name.split(" ")[0]}
+      </strong>
+
+      <small>
+        {friend.status}
+      </small>
+
+    </div>
+
+  ))}
+
+</div>
+
+</section>
+
+{/* ================= RECENT CHATS ================= */}
+
+<section className="recent-chats-section">
+
+  <div className="section-title">
+    <h2>Recent Chats</h2>
+
+    <button onClick={() => setActivePage("Chats")}>
+      See all →
+    </button>
+  </div>
+
+  <div className="recent-chats-list">
+
+    <button
+      className="chat-item"
+      onClick={() => setActivePage("Chats")}
+    >
+      <div className="chat-avatar pink-avatar">
+        A
+        <span className="chat-online"></span>
+      </div>
+
+      <div className="chat-info">
+        <strong>Ananya Sharma</strong>
+        <span>Ready to catch up! 💗</span>
+      </div>
+
+      <div className="chat-time">
+        2m
+      </div>
+    </button>
+
+    <button
+      className="chat-item"
+      onClick={() => setActivePage("Chats")}
+    >
+      <div className="chat-avatar green-avatar">
+        R
+      </div>
+
+      <div className="chat-info">
+        <strong>Rohan Verma</strong>
+        <span>Be right back 👋</span>
+      </div>
+
+      <div className="chat-time">
+        18m
+      </div>
+    </button>
+
+    <button
+      className="chat-item"
+      onClick={() => setActivePage("Chats")}
+    >
+      <div className="chat-avatar beige-avatar">
+        M
+      </div>
+
+      <div className="chat-info">
+        <strong>Meera Singh</strong>
+        <span>Last seen yesterday</span>
+      </div>
+
+      <div className="chat-time">
+        Yesterday
+      </div>
+    </button>
+
+  </div>
+
+</section>
 
 
-                    <p>
-                      {friend.message}
-                    </p>
+</>
 
-
-                    {/* MESSAGE */}
-
-                    <button className="message-btn">
-
-                      <MessageCircle size={19} />
-
-                    </button>
-
-
-                    {/* VIDEO CALL */}
-
-                    <button
-                      className="video-btn"
-                      onClick={() =>
-                        startCall(friend.name)
-                      }
-                    >
-
-                      <Video size={19} />
-
-                    </button>
-
-
-                    {/* MORE */}
-
-                    <button className="more-btn">
-
-                      <MoreVertical size={19} />
-
-                    </button>
-
-                  </div>
-
-                ))}
-
-              </div>
-
-            </section>
-
-          </>
-
-
-        ) : (
+      ) : (
 
           /* ================= OTHER PAGES ================= */
 
-          <section className="friends-page">
+          <section className="chat-page">
 
-            <h1>
-              {activePage}
-            </h1>
+  <div className="chat-sidebar">
 
-            <p>
-              This page is coming next. ✨
-            </p>
+    <div className="chat-header">
+      <div>
+        <h2>Chats</h2>
+        <span>Your conversations</span>
+      </div>
 
-          </section>
+      <button className="new-chat-button">
+        +
+      </button>
+    </div>
+
+    <div className="chat-search">
+      <Search size={17} />
+      <input
+        type="text"
+        placeholder="Search chats..."
+      />
+    </div>
+
+    <div className="chat-list">
+
+    <button
+  className="chat-list-item active"
+  onClick={() => setSelectedChat("Ananya Sharma")}>
+
+        <div className="chat-avatar pink-avatar">
+          A
+          <span className="chat-online"></span>
+        </div>
+
+        <div className="chat-list-info">
+          <strong>Ananya Sharma</strong>
+          <span>Ready to catch up! 💗</span>
+        </div>
+
+        <small>2m</small>
+
+      </button>
+
+      <button
+  className="chat-list-item"
+  onClick={() => setSelectedChat("Rohan Verma")}
+>
+
+        <div className="chat-avatar green-avatar">
+          R
+        </div>
+
+        <div className="chat-list-info">
+          <strong>Rohan Verma</strong>
+          <span>Be right back 👋</span>
+        </div>
+
+        <small>18m</small>
+
+      </button>
+
+      <button
+  className="chat-list-item"
+  onClick={() => setSelectedChat("Meera Singh")}
+  
+>
+
+        <div className="chat-avatar beige-avatar">
+          M
+        </div>
+
+        <div className="chat-list-info">
+          <strong>Meera Singh</strong>
+          <span>Last seen yesterday</span>
+        </div>
+
+        <small>Yesterday</small>
+
+      </button>
+
+    </div>
+
+  </div>
+
+
+  <div className="chat-conversation">
+
+  {/* CHAT HEADER */}
+
+  <div className="conversation-header">
+
+    <div className="conversation-user">
+
+      <div className="chat-avatar pink-avatar">
+        {selectedChat.charAt(0)}
+        <span className="chat-online"></span>
+      </div>
+
+      <div>
+  <strong>{selectedChat}</strong>
+
+  {isTyping ? (
+  <span className="typing-header">
+    typing...
+  </span>
+) : (
+  <span>Online</span>
+)}
+  
+</div>
+
+    </div>
+
+    <div className="conversation-actions">
+
+      <button>
+        <Phone size={19} />
+      </button>
+
+      <button>
+        <Video size={19} />
+      </button>
+
+      <button>
+        <MoreVertical size={19} />
+      </button>
+
+    </div>
+
+  </div>
+
+
+  {/* MESSAGES */}
+
+  <div className="messages-area">
+
+  <div className="message received">
+    <span>Hey! 👋</span>
+  </div>
+
+  <div className="message received">
+    <span>How are you? 💗</span>
+  </div>
+
+  <div className="message sent">
+    <span>I'm good! What about you? 😊</span>
+  </div>
+
+  {messages.map((message, index) => (
+    <div
+      key={index}
+      className={`message ${
+        message.sender === "me"
+          ? "sent"
+          : "received"
+      }`}
+    >
+      <span>{message.text}</span>
+    </div>
+  ))}
+
+
+
+</div>
+
+
+  {/* MESSAGE INPUT */}
+
+  <div className="message-input-area">
+
+    <button className="emoji-button">
+      😊
+    </button>
+
+    <input
+  type="text"
+  placeholder={`Message ${selectedChat}...`}
+  value={messageText}
+  onChange={(e) => {
+    setMessageText(e.target.value);
+  
+    socket.emit("typing", {
+      roomId: chatRoom,
+    });
+  }}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      sendMessage();
+    }
+  }}
+/>
+
+<button
+  className="send-button"
+  onClick={sendMessage}
+>
+  <ArrowRight size={19} />
+</button>
+
+  </div>
+
+</div>
+
+</section>
 
         )}
 
